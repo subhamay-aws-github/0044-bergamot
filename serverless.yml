@@ -1,0 +1,88 @@
+org: subhamayaws
+app: aws-node-project
+service: bergamot
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: python3.8
+  region: us-east-1
+  profile: serverless-admin
+  stage: dev
+  timeout: 30
+  memorySize: 1024
+  environment:
+    THUMBNAIL_SIZE: 128
+    THUMBNAIL_FOLDER: thumbnail-images
+    DYNAMODB_TABLE: bergamot-images
+
+  iam:
+    role:
+      statements:
+        - Effect: 'Allow'
+          Resource: '*'
+          Action: '*'
+
+custom:
+  thumbnailsBucket: bergamot-thumbnails-bucket-${self:provider.stage}-${self:provider.region}
+  pythonRequirements:
+    dockerizePip: true
+
+functions:
+  s3-thumbnail-generator:
+    handler: handler.s3_thumbnail_generator
+    name: bergamot-thumbnail-generator-${self:provider.stage}-${self:provider.region}
+    description: Generating a thumbnail of an image uploaded to a S3 bucket
+    layers:
+      - arn:aws:lambda:us-east-1:770693421928:layer:Klayers-p38-Pillow:5
+    events:
+      - s3:
+          bucket: ${self:custom.thumbnailsBucket}
+          event: s3:ObjectCreated:*
+          rules:
+            - prefix: original-images/
+            - suffix: .png
+      - s3:
+          bucket: ${self:custom.thumbnailsBucket}
+          event: s3:ObjectRemoved:*
+          rules:
+            - prefix: original-images/
+            - suffix: .png
+  list-thumbail-urls:
+    handler: handler.s3_get_thumbnail_urls
+    name: bergamot-list-thumbnail-urls-${self:provider.stage}-${self:provider.region}
+    description: List the thumbnail URLs
+    layers:
+      - arn:aws:lambda:us-east-1:770693421928:layer:Klayers-p38-Pillow:5
+    events:
+      - http:
+          path: images/all
+          method: get 
+          cors: true
+
+
+plugins:
+  - serverless-python-requirements
+
+# you can add CloudFormation resource templates here
+resources:
+  Resources:
+    BergamotImagesTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+          AttributeDefinitions:
+            - AttributeName: originalImageURI
+              AttributeType: S
+          KeySchema:
+            - AttributeName: originalImageURI
+              KeyType: HASH
+          ProvisionedThroughput:
+            ReadCapacityUnits: 1
+            WriteCapacityUnits: 1
+          TableName: ${self:provider.environment.DYNAMODB_TABLE}
+
+  Outputs:
+    BergamotImagesTableArn:
+      Description: The Arn of the images DynamoDB table.
+      Value: !GetAtt BergamotImagesTable.Arn
